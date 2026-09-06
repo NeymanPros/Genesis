@@ -91,6 +91,7 @@ body vs JSON.dump), нужен ли `credentials.fetch('key')` или
 ```markdown
 ### amount → minor (units)
 Source: description: "Сумма в копейках" at properties.amount.
+```
 To override:
 ```yaml
 overrides:

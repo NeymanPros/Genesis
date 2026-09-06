@@ -26,7 +26,7 @@ output/novapay/
 
 ## Установка
 
-```sh
+```
 bundle install
 ```
 
@@ -96,12 +96,11 @@ To override:
 overrides:
   amount_unit: minor    # or `major`
 ```
-```
 
-Скопировал в свой `overrides.yaml`, передал через `--rules` — и warning
+Нужно скопировать в свой `overrides.yaml`, передать через `--rules` — и warning
 исчез. Готовый пример: `examples/novapay_overrides.yaml`. Второй пример
 (другой провайдер, `PayCloud`, bearer + HMAC-SHA512 + Stripe-format)
-живёт в `examples/paycloud_api.yaml` и `examples/paycloud_overrides.yaml`
+находится в `examples/paycloud_api.yaml` и `examples/paycloud_overrides.yaml`
 — на нём же проверяется универсальность тулы.
 
 Полный список примитивов overrides: `amount_unit`, `required_if`,
@@ -135,7 +134,7 @@ bundle exec rspec
 bundle exec rspec --format documentation
 ```
 
-## Проверка того, что генерируется
+## Быстрая проверка
 
 ```sh
 bundle install
@@ -148,12 +147,11 @@ bin/integrate verify output/novapay/novapay_service.rb
 ## Структура проекта
 
 ```
-lib/integrate/    ~2500 строк — парсер, правила, генераторы
+lib/integrate/    парсер, правила, генераторы
 templates/        ERB-шаблоны сервиса, гайда, отчётов
 config/           дефолтные YAML-правила (статусы, ошибки, поля)
 spec/             95 тестов
 examples/         вторая тест-спека (PayCloud) + готовые overrides
-tasks/            эталонная спека из ТЗ (NovaPay) + описание кейса
 bin/integrate     CLI (Thor)
 ```
 

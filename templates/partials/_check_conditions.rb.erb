@@ -1,0 +1,13 @@
+    def check_conditions(operation, request_method)
+      base_result = super
+      return base_result if base_result.failed?
+
+<%- if amount_field && amount_field.units == :minor && amount_field.minimum -%>
+      # Provider requires minimum amount of <%= amount_field.minimum %> minor units
+      # (= <%= amount_field.minimum / 100 %> in major units — see OpenAPI 'minimum').
+      return failure(:unprocessable_entity, 'amount_too_low') if operation.amount < <%= amount_field.minimum / 100 %>
+<%- elsif amount_field && amount_field.minimum -%>
+      return failure(:unprocessable_entity, 'amount_too_low') if operation.amount < <%= amount_field.minimum %>
+<%- end -%>
+      success
+    end

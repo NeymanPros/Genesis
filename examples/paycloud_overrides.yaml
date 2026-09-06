@@ -1,0 +1,33 @@
+# Overrides для PayCloud (Bearer JWT, HMAC-SHA512 Stripe-style, USD/EUR major units).
+#
+# CLI: bin/integrate generate --spec examples/paycloud_api.yaml \
+#                             --provider paycloud --lang ruby \
+#                             --rules examples/paycloud_overrides.yaml
+overrides:
+  amount_unit: major
+
+  # PayCloud не имеет условно-обязательных полей в payload:
+  # beneficiary — единый объект без oneOf/discriminator по типу.
+  required_if: []
+
+  signature:
+    algo:     hmac_sha512
+    encoding: hex
+    body:     raw
+    format:   stripe        # заголовок X-PayCloud-Sig = "t=<ts>,v1=<hex>"
+
+  credentials_access: hash
+
+  status_map:
+    queued:   in_progress
+    sent:     in_progress
+    settled:  approved
+    declined: rejected
+    voided:   rejected
+    expired:  rejected
+
+  error_map:
+    kyc_required:            invalid_credentials
+    beneficiary_not_allowed: recipient_not_found
+    limit_exceeded:          amount_limit_exceeded
+    duplicate_reference:     duplicate

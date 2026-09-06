@@ -1,0 +1,34 @@
+# UNSUPPORTED — что не сгенерилось автоматически
+
+Генератор `integrate` не смог полностью обработать нижеперечисленные элементы
+спецификации `<%= spec_title %>` (`<%= spec_source %>`). Разберите вручную либо
+расширьте правила в `config/*.yaml` / примените `overrides:`.
+<%- if !has_any -%>
+
+_Всё поддержано и однозначно._
+<%- end -%>
+<%- unsupported.each do |category, rows| -%>
+
+## <%= category.to_s.split('_').map(&:capitalize).join(' ') %>
+<%- rows.each do |row| -%>
+- `<%= row[:element] %>`<%= row[:path] ? " (#{row[:path]})" : '' %>: <%= row[:reason] %>.<%= row[:hint] ? " Recommendation: #{row[:hint]}." : '' %>
+<%- end -%>
+<%- end -%>
+<%- if ambiguous.any? -%>
+
+## Ambiguous
+<%- ambiguous.each do |_category, rows| -%>
+<%- rows.each do |row| -%>
+
+### <%= row[:subject] %> → <%= row[:inferred] %> (<%= _category %>)
+Source: <%= row[:source] %>.
+<%- if row[:spec_path] -%>
+Path: <%= row[:spec_path] %>
+<%- end -%>
+To override:
+```yaml
+<%= row[:override_yaml].to_s.chomp %>
+```
+<%- end -%>
+<%- end -%>
+<%- end -%>

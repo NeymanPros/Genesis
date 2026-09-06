@@ -1,0 +1,82 @@
+# Правила распознавания бизнес-полей в схемах OpenAPI по имени/типу/описанию.
+#
+# Алгоритм (Rules::FieldMap):
+#   Для каждого поля из request/response схемы пробуем правила из этого файла.
+#   Правило матчится если:
+#     - имя поля попадает в `name_aliases` (case-insensitive, exact или regex),
+#     - И (если задан) тип попадает в `types` [integer|number|string|boolean|object|array],
+#     - И (если задан) description матчит `desc_match` (регексп, i).
+#   При совпадении полю приписывается роль `role` и, если задано, `units`.
+#
+# Роль используется генератором для маппинга payload:
+#   - amount           → умножается на 100, если units == :minor (см. UnitsDetection)
+#   - currency         → передаётся as-is, дефолт из enum
+#   - external_id      → operation.id
+#   - recipient.phone  → operation.payout_requisite.dig('sbp','phone')
+#   - recipient.bank_code / bank_name / card_number — по аналогии
+#   - idempotency_key  → SecureRandom.uuid или operation.idempotency_key
+
+rules:
+  - role: amount
+    # amount_minor — PayCloud-style: имя намекает на минорные units, но реальные
+    # units определяет UnitsDetection по description ("major units" → :major,
+    # "minor units/копейки/cents" → :minor).
+    name_aliases: ['^amount$', '^sum$', '^value$', '^total$', '^gross$', '^amount_minor$', '^amount_major$']
+    types: [integer, number]
+    # units берётся из UnitsDetection по description (см. mapping_rules.md §UnitsDetection)
+
+  - role: currency
+    name_aliases: ['^currency$', '^ccy$', '^currency_code$']
+    types: [string]
+
+  - role: external_id
+    name_aliases: ['^external_id$', '^order_id$', '^merchant_id$', '^merchant_reference$', '^reference$', '^client_reference$', '^merchant_ref$']
+    types: [string]
+
+  - role: provider_operation_id
+    name_aliases: ['^id$', '^payout_id$', '^payment_id$', '^operation_id$', '^transaction_id$', '^transfer_id$']
+    types: [string]
+
+  - role: recipient_phone
+    name_aliases: ['^phone$', '^msisdn$', '^mobile$', '^phone_number$']
+    types: [string]
+
+  - role: recipient_bank_code
+    # swift/bic/routing_number — все идентификаторы банка-получателя
+    name_aliases: ['^bank_code$', '^bic$', '^bik$', '^swift$', '^routing_number$', '^swift_code$']
+    types: [string]
+
+  - role: recipient_bank_name
+    name_aliases: ['^bank_name$', '^bank$']
+    types: [string]
+
+  - role: recipient_card_number
+    name_aliases: ['^card_number$', '^pan$', '^card$']
+    types: [string]
+
+  - role: recipient_account
+    # iban — международный номер счёта; account — обобщённо
+    name_aliases: ['^account$', '^account_number$', '^iban$', '^wallet$', '^wallet_id$']
+    types: [string]
+
+  - role: recipient_type
+    # Также реагируем на слова-контейнеры (recipient/beneficiary/payee) — они
+    # обозначают вложенный объект получателя, а не «тип» напрямую. Роль ставится
+    # ради того, чтобы генератор знал: этот object-контейнер нужно раскрыть в
+    # payload как вложенный hash реквизитов.
+    name_aliases: ['^type$', '^method$', '^payout_type$', '^recipient$', '^beneficiary$', '^payee$']
+    types: [string, object]
+    desc_match: '(sbp|card|bank|account|beneficiary|payee)'
+    enum_match: '(sbp|card|bank|account|iban|swift)'
+
+  - role: idempotency_key
+    name_aliases: ['^idempotency[-_ ]?key$']
+    types: [string]
+
+  - role: signature
+    name_aliases: ['-signature$', '^signature$', '^x[-_].*[-_]signature$', '^x[-_].*[-_]sig$']
+    types: [string]
+
+# Дефолтная роль для нераспознанных полей — :unknown.
+# Такие поля попадают в UNSUPPORTED.md с комментарием "field not mapped".
+fallback: unknown

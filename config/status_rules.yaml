@@ -1,0 +1,26 @@
+# Правила маппинга статусов провайдера в статусы Space Payments.
+# Порядок важен — первое совпадение выигрывает. Регекспы case-insensitive
+# и матчатся против нормализованного значения (downcase, trim).
+#
+# Внутренние статусы Space Payments: in_progress | approved | rejected
+# Если ни одно правило не сработало — используется `fallback` и статус
+# записывается в output/UNSUPPORTED.md.
+
+rules:
+  # in_progress: заявка принята, но ещё не финализирована
+  - match: '^(pending|created|new|in_progress|awaiting|awaiting_confirmation|initiated|queued|sent|accepted|received|submitted)$'
+    to: in_progress
+  - match: '^(processing|in_process|hold|on_hold|holded|verifying|authorized|reserved)$'
+    to: in_progress
+
+  # approved: терминальный успех
+  - match: '^(completed|success|succeeded|paid|approved|done|settled|finished|ok|captured|confirmed)$'
+    to: approved
+
+  # rejected: терминальный провал
+  - match: '^(failed|rejected|declined|error|denied|expired|blocked)$'
+    to: rejected
+  - match: '^(cancelled|canceled|voided|revoked|refunded|reversed|chargeback|returned)$'
+    to: rejected
+
+fallback: unknown

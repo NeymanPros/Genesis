@@ -1,0 +1,14 @@
+    def create_request(operation, request_method = 'create')
+      payload = build_payout_payload(operation)
+<%- if has_idempotency -%>
+      headers = auth_headers.merge('Idempotency-Key' => idempotency_key_for(operation))
+      response = client.post("#{BASE_URL}<%= endpoint.path %>", json: payload, headers: headers)
+<%- else -%>
+      response = client.post("#{BASE_URL}<%= endpoint.path %>", json: payload, headers: auth_headers)
+<%- end -%>
+      parse_create_response(operation, response)
+    rescue Provider::RateLimitError
+      failure(:too_many_requests, 'provider.rate_limit')
+    rescue Provider::UnauthorizedError
+      failure(:unauthorized, 'provider.invalid_credentials')
+    end

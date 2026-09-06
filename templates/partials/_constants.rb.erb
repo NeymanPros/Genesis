@@ -1,0 +1,19 @@
+    STATUS_MAP = {
+<%- status_map_pairs.each do |provider, internal| -%>
+      '<%= provider %>' => '<%= internal %>',
+<%- end -%>
+    }.freeze
+
+    ERROR_MAP = {
+<%- error_map_pairs.each do |code, key| -%>
+      <%= code %> => '<%= key %>',
+<%- end -%>
+    }.freeze
+
+<%- if provider_error_map_pairs.any? -%>
+    PROVIDER_ERROR_MAP = {
+<%- provider_error_map_pairs.each do |code, key| -%>
+      '<%= code %>' => '<%= key %>',
+<%- end -%>
+    }.freeze
+<%- end -%>

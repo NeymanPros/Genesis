@@ -1,0 +1,6 @@
+    def fetch_status(operation)
+      response = client.get("#{BASE_URL}<%= endpoint.path.gsub(/\{[^}]+\}/, '#{operation.provider_operation_id}') %>", headers: auth_headers)
+      return 'in_progress' if response.status.to_i == 404
+
+      map_status(response.body['status'])
+    end

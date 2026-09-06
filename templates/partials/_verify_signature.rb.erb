@@ -1,0 +1,72 @@
+<%-
+  ov = defined?(overrides) ? overrides : nil
+  effective_algo     = (ov && ov.signature_algo)     || webhook.signature_algo
+  effective_encoding = (ov && ov.signature_encoding) || webhook.signature_encoding || :hex
+  effective_body     = (ov && ov.signature_body)     || :raw
+  effective_format   = (ov && ov.signature_format)   || (stripe_format_signature?(webhook) ? :stripe : :plain)
+  digest_algo = digest_name_for(effective_algo)
+  cred_access = (ov && ov.credentials_access) || :hash
+  secret_expr = cred_access == :method ? "credentials.#{webhook.signature_secret_key}" : "credentials.fetch('#{webhook.signature_secret_key}')"
+  hmac_method = effective_encoding == :base64 ? 'digest' : 'hexdigest'
+-%>
+    # Verify HMAC-<%= effective_algo.to_s.upcase.sub('HMAC_', '') %> signature over the <%= effective_body == :json ? 'JSON-encoded payload' : 'raw webhook body' %>.
+    #
+    # `payload` is the already-parsed JSON body of the webhook. The signature
+    # header value and the raw request body must be enriched by the calling
+    # controller under conventional keys:
+    #
+    #   payload['_signature'] — value of the `<%= webhook.signature_header %>` header.
+    #   payload['_raw_body']  — request.raw_post (byte-identical HTTP body).
+    #
+<%- if effective_body == :raw -%>
+    # `_raw_body` is REQUIRED for byte-identical HMAC — JSON.dump(payload) would
+    # differ from the provider's body by key ordering and whitespace.
+<%- end -%>
+    def verify_signature!(payload)
+      require 'openssl'
+      require 'json'
+
+      signature = payload['_signature'] || payload['signature']
+<%- if effective_body == :json -%>
+      raw       = JSON.dump(payload.reject { |k, _| k.to_s.start_with?('_') })
+<%- else -%>
+      raw       = payload['_raw_body'] ||
+                  raise(Provider::UnauthorizedError,
+                        'raw HTTP body missing: controller must enrich payload with `_raw_body`')
+<%- end -%>
+<%- if effective_format == :stripe -%>
+      # Stripe-style signature header: `t=<unix_ts>,v1=<hex_hmac>`.
+      # HMAC is computed over `"<timestamp>.<raw_body>"`.
+      parts     = signature.to_s.split(',').map { |p| p.split('=', 2) }.to_h
+      timestamp = parts.fetch('t')  { raise Provider::UnauthorizedError, 'Missing timestamp in signature' }
+      provided  = parts.fetch('v1') { raise Provider::UnauthorizedError, 'Missing v1 in signature' }
+      signed    = "#{timestamp}.#{raw}"
+      expected  = OpenSSL::HMAC.<%= hmac_method %>('<%= digest_algo %>', <%= secret_expr %>, signed)
+<%- if effective_encoding == :base64 -%>
+      require 'base64'
+      expected = Base64.strict_encode64(expected)
+<%- end -%>
+
+      return if secure_compare(expected, provided)
+<%- else -%>
+      expected  = OpenSSL::HMAC.<%= hmac_method %>('<%= digest_algo %>', <%= secret_expr %>, raw)
+<%- if effective_encoding == :base64 -%>
+      require 'base64'
+      expected = Base64.strict_encode64(expected)
+<%- end -%>
+
+      return if secure_compare(expected, signature.to_s)
+<%- end -%>
+
+      raise Provider::UnauthorizedError, 'Invalid webhook signature'
+    end
+
+    def secure_compare(left, right)
+      return false if left.bytesize != right.bytesize
+
+      if defined?(Rack::Utils)
+        Rack::Utils.secure_compare(left, right)
+      else
+        OpenSSL.fixed_length_secure_compare(left, right)
+      end
+    end

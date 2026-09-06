@@ -1,0 +1,86 @@
+<%- if endpoint -%>
+    def build_payout_payload(operation)
+<%- required_if_list = (overrides&.required_if || []) -%>
+<%- if required_if_list.any? -%>
+      # Conditional-field rules from `overrides.required_if`:
+<%- required_if_list.each do |rule| -%>
+      #   * <%= rule[:field] %> required when <%= rule[:when].map { |k, v| "#{k}=#{v}" }.join(', ') %>
+<%- end -%>
+<%- end -%>
+      payload = {
+<%- payload_fields.each_with_index do |(name, expr, comment), i| -%>
+<%- if comment -%>
+        # <%= comment %>
+<%- end -%>
+        <%= name %>: <%= expr %><%= i == payload_fields.length - 1 ? '' : ',' %>
+<%- end -%>
+      }
+<%- required_if_list.each do |rule| -%>
+<%- cond_key, cond_val = rule[:when].first -%>
+      # required_if: <%= rule[:field] %> when <%= cond_key %>=<%= cond_val %>
+      if operation.payout_requisite.dig('<%= cond_val %>', '<%= cond_key %>').to_s == '<%= cond_val %>' ||
+         operation.payout_requisite['<%= cond_key %>'].to_s == '<%= cond_val %>'
+        payload[:<%= rule[:field] %>] ||= operation.payout_requisite.dig('<%= cond_val %>', '<%= rule[:field] %>') ||
+                                          operation.payout_requisite['<%= rule[:field] %>']
+      end
+<%- end -%>
+      payload
+    end
+
+    # No mutation of `operation` — the platform reads the returned payload
+    # (`success.payload['id']`) and persists the provider id itself.
+    def parse_create_response(_operation, response)
+      case response.status.to_i
+      when 200, 201
+        success(response.body)
+      when 409
+        # Idempotent duplicate — treat as success; body contains the existing
+        # payout with its `id`.
+        success(response.body)
+      else
+        error_key = provider_error_key(response) || ERROR_MAP.fetch(response.status.to_i, 'internal_error')
+        failure(status_sym_for(response.status.to_i), "provider.#{error_key}")
+      end
+    end
+
+    def provider_error_key(response)
+      return nil unless response.body.is_a?(Hash)
+
+      code = response.body.dig('error', 'code')
+      return nil unless code
+<%- if provider_error_map_defined -%>
+
+      PROVIDER_ERROR_MAP[code.to_s]
+<%- else -%>
+
+      code.to_s
+<%- end -%>
+    end
+
+    def status_sym_for(http_code)
+      {
+        200 => :ok, 201 => :created, 202 => :accepted, 204 => :no_content,
+        400 => :bad_request, 401 => :unauthorized, 402 => :payment_required,
+        403 => :forbidden, 404 => :not_found, 409 => :conflict,
+        422 => :unprocessable_entity, 429 => :too_many_requests,
+        500 => :internal_server_error, 502 => :bad_gateway,
+        503 => :service_unavailable, 504 => :gateway_timeout
+      }[http_code.to_i] || :internal_server_error
+    end
+
+<%- if has_idempotency -%>
+    def idempotency_key_for(operation)
+      require 'securerandom'
+      # Stable per-operation key: retries hit the same server-side idempotency
+      # record, preventing double payouts.
+      key = operation.respond_to?(:idempotency_key) ? operation.idempotency_key : nil
+      key || "op-#{operation.id}"
+    end
+
+<%- end -%>
+<%- end -%>
+<%= render_partial('auth', auth: auth, overrides: overrides) -%>
+<%- if webhook -%>
+
+<%= render_partial('verify_signature', webhook: webhook, overrides: overrides) -%>
+<%- end -%>

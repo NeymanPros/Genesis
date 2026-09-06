@@ -1,0 +1,6 @@
+    # Helper method, NOT part of Provider::BaseService contract.
+    # Returns raw balance payload from provider (amounts in minor units).
+    def fetch_balance
+      response = client.get("#{BASE_URL}<%= endpoint.path %>", headers: auth_headers)
+      response.body
+    end

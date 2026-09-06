@@ -1,0 +1,449 @@
+openapi: 3.0.3
+info:
+  title: PayCloud Transfers API
+  description: |
+    Mock API вымышленного платёжного провайдера PayCloud для проверки универсальности
+    генератора `integrate`. Отличается от NovaPay:
+      * Bearer JWT в Authorization (вместо API Key).
+      * Подпись webhook HMAC-SHA512 в формате Stripe-style `t=<ts>,v1=<hex>`.
+      * Роль отмены — /void вместо /cancel.
+      * Amount в major units (USD/EUR как decimal).
+      * RFC 7807 (application/problem+json) для ошибок.
+      * Отсутствует /balance; отсутствует Idempotency-Key header.
+  version: 2.3.0
+  contact:
+    name: PayCloud Integrations
+    email: integrations@paycloud.example
+
+servers:
+  - url: https://api.sandbox.paycloud.example/v2
+    description: Sandbox
+  - url: https://api.paycloud.example/v2
+    description: Production
+
+tags:
+  - name: Transfers
+    description: Операции переводов (создание, статус, отмена)
+  - name: Webhooks
+    description: Асинхронные уведомления о смене статуса
+
+paths:
+  /v2/transfers:
+    post:
+      tags: [Transfers]
+      summary: Create a transfer
+      description: |
+        Создаёт новый перевод бенефициару по SWIFT/SEPA.
+        Сумма указывается в major units (доллары/евро, decimal, две цифры после точки).
+      operationId: createTransfer
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransferRequest'
+            examples:
+              sepa_transfer:
+                summary: SEPA transfer in EUR
+                value:
+                  amount_minor: 125.50
+                  currency: EUR
+                  reference: "ord_20260901_001"
+                  beneficiary:
+                    holder_name: "Jane Doe"
+                    iban: "DE89370400440532013000"
+                    swift: "COBADEFFXXX"
+              swift_transfer:
+                summary: SWIFT transfer in USD
+                value:
+                  amount_minor: 2500.00
+                  currency: USD
+                  reference: "ord_20260901_002"
+                  beneficiary:
+                    holder_name: "John Smith"
+                    iban: "US64SVBKUS6S3300958879"
+                    swift: "SVBKUS6S"
+      responses:
+        '201':
+          description: Transfer accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+              example:
+                transfer_id: "tr_9f2c1a8b"
+                reference: "ord_20260901_001"
+                status: queued
+                amount_minor: 125.50
+                currency: EUR
+                created_at: "2026-09-01T12:00:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: Insufficient funds on merchant account
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: "https://paycloud.example/problems/insufficient-funds"
+                title: "Insufficient funds"
+                status: 402
+                detail: "Merchant balance is below the requested amount."
+                instance: "/v2/transfers"
+        '422':
+          description: Validation error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: "https://paycloud.example/problems/validation"
+                title: "Validation failed"
+                status: 422
+                detail: "amount_minor must be greater than 0.01"
+                instance: "/v2/transfers"
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v2/transfers/{transfer_id}:
+    get:
+      tags: [Transfers]
+      summary: Get transfer status
+      operationId: getTransfer
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: transfer_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "tr_9f2c1a8b"
+      responses:
+        '200':
+          description: Current transfer state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Transfer not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: "https://paycloud.example/problems/not-found"
+                title: "Transfer not found"
+                status: 404
+                detail: "No transfer with id tr_9f2c1a8b"
+                instance: "/v2/transfers/tr_9f2c1a8b"
+
+  /v2/transfers/{transfer_id}/void:
+    post:
+      tags: [Transfers]
+      summary: Void a transfer
+      description: |
+        Отмена перевода. Возможна только в статусах `queued` и `sent`.
+        После `settled` вернуть средства можно только через refund (не входит в MVP).
+      operationId: voidTransfer
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: transfer_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Transfer voided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+        '409':
+          description: Cannot void in current status
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: "https://paycloud.example/problems/invalid-status"
+                title: "Invalid state transition"
+                status: 409
+                detail: "Cannot void a transfer in status settled"
+                instance: "/v2/transfers/tr_9f2c1a8b/void"
+
+  /callbacks:
+    post:
+      tags: [Webhooks]
+      summary: Transfer status webhook
+      description: |
+        PayCloud шлёт POST на URL, зарегистрированный в личном кабинете.
+        Подпись — HMAC-SHA512 от `"<timestamp>.<raw_body>"`, передаётся в заголовке
+        `X-PayCloud-Sig` в Stripe-style формате: `t=1735680000,v1=<hex>`.
+      operationId: transferWebhook
+      security: []
+      parameters:
+        - name: X-PayCloud-Sig
+          in: header
+          required: true
+          schema:
+            type: string
+          description: |
+            HMAC-SHA512 подпись в формате `t=<unix_timestamp>,v1=<hex_digest>`.
+            Секрет выдаётся при подключении (`callback_secret`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookPayload'
+            examples:
+              settled:
+                summary: Transfer settled
+                value:
+                  type: transfer.settled
+                  transfer_id: "tr_9f2c1a8b"
+                  reference: "ord_20260901_001"
+                  status: settled
+                  amount_minor: 125.50
+                  currency: EUR
+                  settled_at: "2026-09-01T12:05:00Z"
+              declined:
+                summary: Transfer declined by bank
+                value:
+                  type: transfer.declined
+                  transfer_id: "tr_9f2c1a8b"
+                  reference: "ord_20260901_001"
+                  status: declined
+                  problem:
+                    type: "https://paycloud.example/problems/bank-declined"
+                    title: "Beneficiary bank declined"
+                    detail: "Recipient IBAN blocked"
+              voided:
+                summary: Transfer voided by merchant
+                value:
+                  type: transfer.voided
+                  transfer_id: "tr_9f2c1a8b"
+                  reference: "ord_20260901_002"
+                  status: voided
+      responses:
+        '200':
+          description: Webhook accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+                    example: true
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT access-token, получается заранее через личный кабинет PayCloud.
+        Передаётся в заголовке `Authorization: Bearer <access_token>`.
+
+  schemas:
+    CreateTransferRequest:
+      type: object
+      required: [amount_minor, currency, reference, beneficiary]
+      properties:
+        amount_minor:
+          type: number
+          format: decimal
+          description: Amount in USD/EUR (major units, decimal with 2 fraction digits).
+          minimum: 0.01
+          example: 125.50
+        currency:
+          type: string
+          enum: [USD, EUR]
+          example: EUR
+        reference:
+          type: string
+          description: Merchant-side reference id (external order id).
+          maxLength: 80
+          example: "ord_20260901_001"
+        beneficiary:
+          $ref: '#/components/schemas/Beneficiary'
+
+    Beneficiary:
+      type: object
+      required: [holder_name, iban]
+      properties:
+        holder_name:
+          type: string
+          description: Full legal name of the beneficiary.
+          example: "Jane Doe"
+        iban:
+          type: string
+          description: International Bank Account Number.
+          pattern: '^[A-Z]{2}[0-9A-Z]{13,32}$'
+          example: "DE89370400440532013000"
+        swift:
+          type: string
+          description: SWIFT / BIC code of the beneficiary bank.
+          pattern: '^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$'
+          example: "COBADEFFXXX"
+
+    TransferResponse:
+      type: object
+      properties:
+        transfer_id:
+          type: string
+          example: "tr_9f2c1a8b"
+        reference:
+          type: string
+          example: "ord_20260901_001"
+        status:
+          type: string
+          enum: [queued, sent, settled, declined, voided, expired]
+        amount_minor:
+          type: number
+          format: decimal
+          example: 125.50
+        currency:
+          type: string
+          example: EUR
+        beneficiary:
+          $ref: '#/components/schemas/Beneficiary'
+        problem:
+          $ref: '#/components/schemas/Problem'
+        created_at:
+          type: string
+          format: date-time
+        settled_at:
+          type: string
+          format: date-time
+
+    WebhookPayload:
+      type: object
+      required: [type, transfer_id, status]
+      properties:
+        type:
+          type: string
+          description: Event type in dot-notation.
+          enum:
+            - transfer.queued
+            - transfer.sent
+            - transfer.settled
+            - transfer.declined
+            - transfer.voided
+            - transfer.expired
+        transfer_id:
+          type: string
+        reference:
+          type: string
+        status:
+          type: string
+          enum: [queued, sent, settled, declined, voided, expired]
+        amount_minor:
+          type: number
+          format: decimal
+        currency:
+          type: string
+        settled_at:
+          type: string
+          format: date-time
+        problem:
+          $ref: '#/components/schemas/Problem'
+
+    Problem:
+      description: |
+        RFC 7807 problem details object. Возвращается как `application/problem+json`
+        для 4xx/5xx ответов и вкладывается в webhook при declined/expired.
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI reference identifying the problem type.
+          example: "https://paycloud.example/problems/validation"
+        title:
+          type: string
+          description: Short, human-readable summary of the problem type.
+          example: "Validation failed"
+        status:
+          type: integer
+          description: Original HTTP status code.
+          example: 422
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
+          example: "amount_minor must be greater than 0.01"
+        instance:
+          type: string
+          description: URI reference identifying the specific occurrence.
+          example: "/v2/transfers"
+
+  responses:
+    BadRequest:
+      description: Malformed request
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: "https://paycloud.example/problems/bad-request"
+            title: "Bad request"
+            status: 400
+            detail: "Malformed JSON body"
+            instance: "/v2/transfers"
+    Unauthorized:
+      description: Invalid or expired bearer token
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: "https://paycloud.example/problems/unauthorized"
+            title: "Unauthorized"
+            status: 401
+            detail: "Bearer token invalid or expired"
+            instance: "/v2/transfers"
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: "https://paycloud.example/problems/rate-limit"
+            title: "Rate limit exceeded"
+            status: 429
+            detail: "Retry after 30 seconds"
+            instance: "/v2/transfers"
+    InternalError:
+      description: Provider-side error
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: "https://paycloud.example/problems/internal"
+            title: "Internal error"
+            status: 500
+            detail: "Unexpected server error"
+            instance: "/v2/transfers"

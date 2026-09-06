@@ -1,0 +1,34 @@
+<%= render_partial('header', info: info, base_url: base_url, env_key: env_key, generator_version: generator_version, generated_at: generated_at, spec_path: spec_path, spec_sha256: spec_sha256, rules_path: rules_path, rules_sha256: rules_sha256) -%>
+<%= render_partial('constants', status_map_pairs: status_map_pairs, error_map_pairs: error_map_pairs, provider_error_map_pairs: provider_error_map_pairs) -%>
+
+<%- if endpoints_by_role[:create]&.any? -%>
+<%= render_partial('create', endpoint: endpoints_by_role[:create].first, has_idempotency: has_idempotency) -%>
+
+<%- end -%>
+<%- if endpoints_by_role[:status]&.any? -%>
+<%= render_partial('fetch_status', endpoint: endpoints_by_role[:status].first) -%>
+
+<%- end -%>
+<%- if endpoints_by_role[:cancel]&.any? -%>
+<%= render_partial('cancel', endpoint: endpoints_by_role[:cancel].first) -%>
+
+<%- end -%>
+<%- if endpoints_by_role[:callback]&.any? -%>
+<%= render_partial('process_callback', endpoint: endpoints_by_role[:callback].first, webhook: webhook) -%>
+
+<%- end -%>
+<%- if endpoints_by_role[:balance]&.any? -%>
+<%= render_partial('balance', endpoint: endpoints_by_role[:balance].first) -%>
+
+<%- end -%>
+<%= render_partial('check_conditions', amount_field: amount_field) -%>
+
+    def map_status(provider_status)
+      STATUS_MAP.fetch(provider_status.to_s, 'in_progress')
+    end
+
+    private
+
+<%= render_partial('private', endpoint: endpoints_by_role[:create]&.first, auth: auth, webhook: webhook, payload_fields: payload_fields, has_idempotency: has_idempotency, provider_error_map_defined: provider_error_map_defined, overrides: overrides) -%>
+  end
+end

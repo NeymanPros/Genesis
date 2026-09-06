@@ -1,0 +1,16 @@
+    def cancel_request(operation)
+      response = client.post("#{BASE_URL}<%= endpoint.path.gsub(/\{[^}]+\}/, '#{operation.provider_operation_id}') %>", headers: auth_headers)
+      case response.status.to_i
+      when 200, 204
+        success(response.body)
+      when 409
+        failure(:conflict, "provider.#{response.body.dig('error', 'code') || 'invalid_status'}")
+      else
+        error_key = ERROR_MAP.fetch(response.status.to_i, 'internal_error')
+        failure(status_sym_for(response.status.to_i), "provider.#{error_key}")
+      end
+    rescue Provider::RateLimitError
+      failure(:too_many_requests, 'provider.rate_limit')
+    rescue Provider::UnauthorizedError
+      failure(:unauthorized, 'provider.invalid_credentials')
+    end

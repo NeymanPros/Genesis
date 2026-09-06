@@ -1,0 +1,23 @@
+    # Webhook signature: <%= webhook&.signature_header || 'X-Signature' %>
+    # Algorithm: <%= webhook&.signature_algo || :unknown %> (<%= webhook&.signature_encoding || :hex %>).
+<%- id_field = (webhook&.id_field_path || []).first || 'payout_id' -%>
+    def process_callback(payload)
+      verify_signature!(payload)
+
+      # Support both `event` (NovaPay-style: 'payout.completed') and `type`
+      # (PayCloud/Stripe-style: 'transfer.settled') as the event discriminator.
+      event = payload['event'] || payload['type']
+
+      case event
+      when /completed$|settled$|paid$|succeeded$/
+        approve_operation(payload['<%= id_field %>'])
+      when /failed$|declined$|rejected$/
+        reject_operation(payload['<%= id_field %>'], payload.dig('error', 'code') || payload.dig('problem', 'type'))
+      when /cancelled$|canceled$|voided$/
+        reject_operation(payload['<%= id_field %>'], 'cancelled')
+      when /processing$|sent$|queued$/
+        success
+      else
+        failure(:unprocessable_entity, 'unknown_event')
+      end
+    end

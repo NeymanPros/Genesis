@@ -1,0 +1,98 @@
+# Правила маппинга ошибок провайдера в внутренние ключи Space Payments.
+#
+# Трёхуровневая логика (применяется в порядке, побеждает первое совпадение):
+#   1) Сначала пробуем `by_provider_type` — для RFC 7807 (application/problem+json).
+#      Матчим против поля `type` из body (URI, обычно вида
+#      "https://provider.example/problems/<slug>"). Регексп чаще всего
+#      привязывается к последнему сегменту URI (`insufficient-funds$`).
+#      Ветка используется, только если у ответа тело содержит ключ `type`.
+#   2) Если не совпало — `by_provider_code` (плоский `error.code`, NovaPay-style).
+#   3) Если не совпало — `by_http_status`.
+#   4) Если и HTTP не совпал — глобальный `fallback` + запись в UNSUPPORTED.md.
+#
+# Внутренние ключи (для `failure(:sym, "provider.<key>")`):
+#   validation_error, invalid_credentials, insufficient_balance,
+#   recipient_not_found, bank_unavailable, amount_limit_exceeded,
+#   rate_limit, duplicate, not_found, invalid_status, internal_error, unknown.
+#
+# `http_sym` — строка, генератор в шаблоне превратит в symbol (":unprocessable_entity").
+
+# Уровень 1: RFC 7807 provider-specific type (по последнему сегменту URI из `type`).
+# Ветка опциональна — генератор игнорирует её, если body не содержит поля `type`.
+by_provider_type:
+  - match: 'insufficient[-_]?funds$'
+    to: insufficient_balance
+    http_sym: payment_required
+  - match: 'validation$'
+    to: validation_error
+    http_sym: unprocessable_entity
+  - match: 'bank[-_]?declined$'
+    to: bank_unavailable
+    http_sym: service_unavailable
+  - match: 'invalid[-_]?status$'
+    to: invalid_status
+    http_sym: conflict
+  - match: '(unauthorized|forbidden)$'
+    to: invalid_credentials
+    http_sym: unauthorized
+  - match: '(rate[-_]?limit|too[-_]?many[-_]?requests)$'
+    to: rate_limit
+    http_sym: too_many_requests
+  - match: 'not[-_]?found$'
+    to: not_found
+    http_sym: not_found
+  - match: '(internal|server[-_]?error)$'
+    to: internal_error
+    http_sym: internal_server_error
+
+# Уровень 2: provider-specific коды (по имени error.code)
+by_provider_code:
+  - match: '^validation_error$'
+    to: validation_error
+    http_sym: unprocessable_entity
+  - match: '^(unauthorized|invalid_api_key|invalid_credentials)$'
+    to: invalid_credentials
+    http_sym: unauthorized
+  - match: '^insufficient_balance$'
+    to: insufficient_balance
+    http_sym: payment_required
+  - match: '^recipient_not_found$'
+    to: recipient_not_found
+    http_sym: unprocessable_entity
+  - match: '^bank_unavailable$'
+    to: bank_unavailable
+    http_sym: service_unavailable
+  - match: '^amount_limit_exceeded$'
+    to: amount_limit_exceeded
+    http_sym: unprocessable_entity
+  - match: '^rate_limit_exceeded$'
+    to: rate_limit
+    http_sym: too_many_requests
+  - match: '^(not_found|payout_not_found)$'
+    to: not_found
+    http_sym: not_found
+  - match: '^invalid_status$'
+    to: invalid_status
+    http_sym: conflict
+  - match: '^internal_error$'
+    to: internal_error
+    http_sym: internal_server_error
+
+# Уровень 2: по HTTP-коду
+by_http_status:
+  400: { to: validation_error,     http_sym: bad_request }
+  401: { to: invalid_credentials,  http_sym: unauthorized }
+  402: { to: insufficient_balance, http_sym: payment_required }
+  403: { to: invalid_credentials,  http_sym: forbidden }
+  404: { to: not_found,            http_sym: not_found }
+  409: { to: duplicate,            http_sym: conflict }
+  422: { to: validation_error,     http_sym: unprocessable_entity }
+  429: { to: rate_limit,           http_sym: too_many_requests }
+  500: { to: internal_error,       http_sym: internal_server_error }
+  502: { to: internal_error,       http_sym: bad_gateway }
+  503: { to: internal_error,       http_sym: service_unavailable }
+  504: { to: internal_error,       http_sym: gateway_timeout }
+
+fallback:
+  to: unknown
+  http_sym: internal_server_error

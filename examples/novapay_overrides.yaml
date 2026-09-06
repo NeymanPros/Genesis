@@ -1,0 +1,37 @@
+# Overrides для NovaPay (эквивалент дефолтного поведения генератора).
+# Используйте этот файл, чтобы отключить все Ambiguous-warnings при
+# прогоне на tasks/provider_api.yaml.
+#
+# CLI: bin/integrate generate --spec tasks/provider_api.yaml \
+#                             --provider novapay --lang ruby \
+#                             --rules examples/novapay_overrides.yaml
+overrides:
+  amount_unit: minor
+
+  required_if:
+    - { field: bank_code,   when: { type: sbp  } }
+    - { field: card_number, when: { type: card } }
+
+  signature:
+    algo:     hmac_sha256
+    encoding: hex
+    body:     raw
+    format:   plain
+
+  credentials_access: hash
+
+  status_map:
+    pending:    in_progress
+    processing: in_progress
+    completed:  approved
+    failed:     rejected
+    cancelled:  rejected
+
+  error_map:
+    validation_error:      validation_error
+    insufficient_balance:  insufficient_balance
+    recipient_not_found:   recipient_not_found
+    bank_unavailable:      bank_unavailable
+    amount_limit_exceeded: amount_limit_exceeded
+    rate_limit_exceeded:   rate_limit
+    internal_error:        internal_error

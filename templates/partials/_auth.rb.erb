@@ -1,0 +1,42 @@
+<%-
+  # Defaults to :hash (per docs/analysis/overrides_spec.md §2.4).
+  cred_access = (defined?(overrides) && overrides && overrides.credentials_access) || :hash
+  cred = ->(key) { cred_access == :method ? "credentials.#{key}" : "credentials.fetch('#{key}')" }
+-%>
+    def auth_headers
+<%- if auth.nil? -%>
+      # TODO: no auth scheme detected in the OpenAPI spec — populate manually.
+      raise NotImplementedError, 'Adjust auth manually'
+<%- elsif auth.type == :api_key && auth.location == :header -%>
+      { '<%= auth.header_or_param_name %>' => <%= cred.call('api_key') %> }
+<%- elsif auth.type == :api_key && auth.location == :query -%>
+      # API key travels in the query string — auth_headers is a no-op; see
+      # `auth_query` below (merge it into the request `params`).
+      {}
+<%- elsif auth.type == :bearer -%>
+      # TODO: credential key name defaults to 'access_token' — override via
+      # `credentials.fetch('bearer_token')` or `'jwt'` if your storage differs.
+      { 'Authorization' => "Bearer #{<%= cred.call('access_token') %>}" }
+<%- elsif auth.type == :basic -%>
+      require 'base64'
+      user = <%= cred.call('username') %>
+      pass = <%= cred.call('password') %>
+      { 'Authorization' => "Basic #{Base64.strict_encode64("#{user}:#{pass}")}" }
+<%- elsif auth.type == :oauth2 && auth.oauth2_flow == :client_credentials -%>
+      # TODO: OAuth2 client_credentials — obtain access_token via token_url
+      # (<%= auth.token_url %>) using credentials['client_id'] and
+      # credentials['client_secret'], then cache until expiry.
+      { 'Authorization' => "Bearer #{<%= cred.call('access_token') %>}" }
+<%- else -%>
+      # TODO: auth scheme `<%= auth.type %>` not fully supported by the generator.
+      # Adjust auth manually — see docs/analysis/paycloud_expectations.md for
+      # the list of supported schemes.
+      raise NotImplementedError, 'Adjust auth manually'
+<%- end -%>
+    end
+<%- if auth && auth.type == :api_key && auth.location == :query -%>
+
+    def auth_query
+      { '<%= auth.header_or_param_name %>' => <%= cred.call('api_key') %> }
+    end
+<%- end -%>

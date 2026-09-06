@@ -98,8 +98,8 @@ overrides:
   amount_unit: minor    # or `major`
 ```
 
-Нужно скопировать в свой `overrides.yaml`, передать через `--rules` — и warning
-исчез. Готовый пример: `examples/novapay_overrides.yaml`. Второй пример
+Нужно скопировать в свой `overrides.yaml`, передать через `--rules`. 
+Готовый пример: `examples/novapay_overrides.yaml`. Второй пример
 (другой провайдер, `PayCloud`, bearer + HMAC-SHA512 + Stripe-format)
 находится в `examples/paycloud_api.yaml` и `examples/paycloud_overrides.yaml`
 — на нём же проверяется универсальность тулы.

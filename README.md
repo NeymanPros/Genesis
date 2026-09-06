@@ -34,8 +34,8 @@ bundle install
 
 ## Запуск
 
-```sh
-bin/integrate generate --spec tasks/provider_api.yaml --provider novapay
+```ruby
+ruby bin/integrate generate --spec examples/paycloud_api.yaml --provider paycloud
 ```
 
 При успешном запуске:
